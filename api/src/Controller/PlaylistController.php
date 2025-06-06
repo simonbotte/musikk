@@ -6,11 +6,15 @@ use App\Entity\User;
 use App\Repository\PlaylistRepository;
 use App\Repository\UserRepository;
 use App\Service\AppleMusicService;
+use App\Service\PlaylistDataService;
 use App\Service\PlaylistService;
+use App\Service\SongService;
 use App\Service\SpotifyService;
+use PlaylistDataName;
 use PouleR\AppleMusicAPI\APIClient;
 use PouleR\AppleMusicAPI\AppleMusicAPI;
 use PouleR\AppleMusicAPI\Entity\LibraryResource;
+use ServiceName;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -29,6 +33,8 @@ final class PlaylistController extends AbstractController
         private PlaylistService $playlistService,
         private AppleMusicService $appleMusicService,
         private SpotifyService $spotifyService,
+        private PlaylistDataService $playlistDataService,
+        private SongService $songService,
     ) {
     }
 
@@ -40,22 +46,16 @@ final class PlaylistController extends AbstractController
             return new JsonResponse(['error' => 'User not found'], 403);
         }
 
+        $appleMusicPlaylists = $this->appleMusicService->getPlaylists($user);
         $spotifyPlaylists = $this->spotifyService->getPlaylists($user);
-        dd($spotifyPlaylists);
-        // $appleMusicUserToken = $this->appleMusicService->getUserToken($user);
-        // if (!$appleMusicUserToken) {
-        //     return new JsonResponse(['error' => 'Apple Music user token not found'], 403);
-        // }
-
-        // $curl = new \Symfony\Component\HttpClient\CurlHttpClient();
-        // $client = new APIClient($curl);
-        // $client->setDeveloperToken($this->appleMusicService->generateToken());
-        // $client->setMusicUserToken($appleMusicUserToken);
-        // $api = new AppleMusicAPI($client);
-
-        // $playlist = $this->playlistService->formatPlaylist($api, $playlist);
-
-        $response = new JsonResponse($playlist);
+        
+        $appleMusicPlaylistsFormated = $this->playlistService->formatPlaylists($appleMusicPlaylists->toArray());
+        $spotifyPlaylistsFormated = $this->playlistService->formatPlaylists($spotifyPlaylists->toArray());
+        $playslists = [
+            'appleMusic' => $appleMusicPlaylistsFormated,
+            'spotify' => $spotifyPlaylistsFormated,
+        ];
+        $response = new JsonResponse($playslists);
         return $response;
     }
 
@@ -71,20 +71,26 @@ final class PlaylistController extends AbstractController
         if (!$playlist) {
             return new JsonResponse(['error' => 'Playlist not found'], 403);
         }
-
-        $appleMusicUserToken = $this->appleMusicService->getUserToken($user);
-        if (!$appleMusicUserToken) {
-            return new JsonResponse(['error' => 'Apple Music user token not found'], 403);
+        $playlistService = $this->playlistDataService->getData($playlist, PlaylistDataName::SERVICE_NAME);
+        
+        $formatedSongs = [];
+        $songs = null;
+        switch ($playlistService) {
+            case ServiceName::APPLE_MUSIC:
+                $songs = $this->appleMusicService->getPlaylistSongs($user, $playlist);
+                break;
+            case ServiceName::SPOTIFY:
+                $songs = $this->spotifyService->getPlaylistSongs($user, $playlist);
+                break;
+            default:
+                return new JsonResponse(['error' => 'Unknown service'], 400);
+                break;
         }
-
-        $curl = new \Symfony\Component\HttpClient\CurlHttpClient();
-        $client = new APIClient($curl);
-        $client->setDeveloperToken($this->appleMusicService->generateToken());
-        $client->setMusicUserToken($appleMusicUserToken);
-        $api = new AppleMusicAPI($client);
-
-        $playlist = $this->playlistService->formatPlaylist($api, $playlist);
-
+        if ($songs) {
+            $formatedSongs = $this->songService->formatSongs($songs->toArray());
+        }
+        $playlist = $playlist->toArray();
+        $playlist['songs'] = $formatedSongs;
         $response = new JsonResponse($playlist);
         return $response;
     }

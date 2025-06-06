@@ -7,6 +7,7 @@ use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
+use PlaylistDataName;
 
 #[ORM\Entity(repositoryClass: PlaylistRepository::class)]
 class Playlist
@@ -31,9 +32,16 @@ class Playlist
     #[ORM\Column(type: Types::TEXT)]
     private ?string $uuid = null;
 
+    /**
+     * @var Collection<int, Song>
+     */
+    #[ORM\ManyToMany(targetEntity: Song::class, inversedBy: 'playlists')]
+    private Collection $songs;
+
     public function __construct()
     {
         $this->playlistData = new ArrayCollection();
+        $this->songs = new ArrayCollection();
     }
 
     public function toArray(): array
@@ -44,6 +52,9 @@ class Playlist
             'uuid' => $this->getUuid(),
             'user' => $this->getUser() ? $this->getUser()->getUuid() : null,
             'playlistData' => $this->getPlaylistData()->toArray(),
+            'service' => $this->getPlaylistData()->filter(function (PlaylistData $data) {
+                return $data->getName() === PlaylistDataName::SERVICE_NAME;
+            })->first()?->getValue(),
         ];
     }
 
@@ -114,6 +125,30 @@ class Playlist
     public function setUuid(string $uuid): static
     {
         $this->uuid = $uuid;
+
+        return $this;
+    }
+
+    /**
+     * @return Collection<int, Song>
+     */
+    public function getSongs(): Collection
+    {
+        return $this->songs;
+    }
+
+    public function addSong(Song $song): static
+    {
+        if (!$this->songs->contains($song)) {
+            $this->songs->add($song);
+        }
+
+        return $this;
+    }
+
+    public function removeSong(Song $song): static
+    {
+        $this->songs->removeElement($song);
 
         return $this;
     }

@@ -64,6 +64,15 @@ class PlaylistService
         return $userPlaylist;
     }
 
+    public function formatPlaylists(array $playlists): array
+    {
+        $formattedPlaylists = [];
+        foreach ($playlists as $playlist) {
+            $formattedPlaylists[] = $playlist->toArray();
+        }
+        return $formattedPlaylists;
+    }
+
     public function formatPlaylist(AppleMusicAPI $api, Playlist $playlist): array
     {
         $playlistResponse = $api->getLibraryPlaylist($this->getPlaylistId($playlist), ['tracks']);

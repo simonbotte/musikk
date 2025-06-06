@@ -2,10 +2,12 @@
 import type { Song } from "~/types/song";
 
 const props = defineProps<{
+    service: "apple_music" | "spotify";
     onAddClick: (song: Song) => void;
 }>();
 
 const route = useRoute();
+const user = useCookie<User | null>("user");
 const query = ref<string>("");
 const songs = ref<Song[]>([]);
 const temporizer = ref<ReturnType<typeof setTimeout> | null>(null);
@@ -24,11 +26,16 @@ const search = async () => {
         const querySerialized = query.value.replace(/\s/g, "+");
 
         const { data: searchResponse } = await useFetch<Song[] | null>(
-            `http://musikk.localhost/api/apple-music/search/${querySerialized}`
+            `https://musikk.localhost/api/song/search/${props.service}/${querySerialized}`,{
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${user?.value?.token}`,
+                },
+            }
         );
 
         songs.value = searchResponse.value ?? [];
-    }, 200);
+    }, 300);
 };
 </script>
 
@@ -45,7 +52,7 @@ const search = async () => {
                     @input="search"
                 />
             </div>
-            <div class="flex flex-col w-full mt-4">
+            <div v-if="songs.length > 0" class="flex flex-col w-full mt-4">
                 <p class="text-xl font-bold">Results</p>
                 <div class="flex flex-col w-full mt-2">
                     <div v-for="song in songs" :key="song.id" class="flex justify-between border-b border-gray-300 p-2">
