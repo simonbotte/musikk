@@ -63,6 +63,7 @@ services:
     container_name: musikk_api
     build:
       context: ../api
+      dockerfile: Dockerfile.dev
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.api.rule=Host(`api.musikk.localhost`)"

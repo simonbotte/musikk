@@ -1,0 +1,28 @@
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: ":443"
+
+api:
+  dashboard: false  # désactivé en prod
+
+providers:
+  docker:
+    exposedByDefault: false
+  file:
+    filename: /etc/traefik/dynamic.yml
+
+certificatesResolvers:
+  le:
+    acme:
+      email: PLACEHOLDER_LETSENCRYPT_EMAIL
+      storage: /letsencrypt/acme.json
+      httpChallenge:
+        entryPoint: web
