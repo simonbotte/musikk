@@ -2,6 +2,7 @@
 
 namespace App\Controller;
 
+use App\Entity\Collaboration;
 use App\Entity\User;
 use App\Repository\PlaylistRepository;
 use App\Repository\UserRepository;
@@ -10,16 +11,20 @@ use App\Service\PlaylistDataService;
 use App\Service\PlaylistService;
 use App\Service\SongService;
 use App\Service\SpotifyService;
-use PlaylistDataName;
+use Doctrine\ORM\EntityManagerInterface;
+use App\Enum\PlaylistDataName;
 use PouleR\AppleMusicAPI\APIClient;
 use PouleR\AppleMusicAPI\AppleMusicAPI;
 use PouleR\AppleMusicAPI\Entity\LibraryResource;
-use ServiceName;
+use App\Enum\ServiceName;
+use App\Enum\SongDataName;
+use App\Repository\SongRepository;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Uid\Uuid;
 
 #[Route('/playlist', name: 'app_playlist')]
 final class PlaylistController extends AbstractController
@@ -35,6 +40,8 @@ final class PlaylistController extends AbstractController
         private SpotifyService $spotifyService,
         private PlaylistDataService $playlistDataService,
         private SongService $songService,
+        private EntityManagerInterface $em,
+        private SongRepository $songRepository,
     ) {
     }
 
@@ -59,6 +66,23 @@ final class PlaylistController extends AbstractController
         return $response;
     }
 
+    #[Route('/{playlistUuid}/collaborations', name: '_collaborations', methods: ['GET'])]
+    public function collaboration(string $playlistUuid, Request $request): JsonResponse
+    {
+        $playlist = $this->playlistRepository->findOneBy(['uuid' => $playlistUuid]);
+        if (!$playlist) {
+            return new JsonResponse(['error' => 'Playlist not found'], 403);
+        }
+
+        $collaborations = $playlist->getCollaborations();
+        $collaborationsArray = [];
+        foreach ($collaborations as $collaboration) {
+            $collaborationsArray[] = $collaboration->toArray();
+        }
+        $response = new JsonResponse($collaborationsArray);
+        return $response;
+    }
+
     #[Route('/{userUuid}/{playlistUuid}', name: '_one', methods: ['GET'])]
     public function playlist(string $userUuid, string $playlistUuid, Request $request): JsonResponse
     {
@@ -74,7 +98,7 @@ final class PlaylistController extends AbstractController
         $playlistService = $this->playlistDataService->getData($playlist, PlaylistDataName::SERVICE_NAME);
         
         $formatedSongs = [];
-        $songs = null;
+        $songs = [];
         switch ($playlistService) {
             case ServiceName::APPLE_MUSIC:
                 $songs = $this->appleMusicService->getPlaylistSongs($user, $playlist);
@@ -86,17 +110,19 @@ final class PlaylistController extends AbstractController
                 return new JsonResponse(['error' => 'Unknown service'], 400);
                 break;
         }
+
         if ($songs) {
             $formatedSongs = $this->songService->formatSongs($songs->toArray());
         }
+
         $playlist = $playlist->toArray();
         $playlist['songs'] = $formatedSongs;
         $response = new JsonResponse($playlist);
         return $response;
     }
 
-    #[Route('/{userUuid}/{playlistUuid}/add-song/{songId}', name: '_all', methods: ['POST'])]
-    public function playlistAddSong(string $userUuid, string $playlistUuid, string $songId, Request $request): JsonResponse
+    #[Route('/{userUuid}/{playlistUuid}/add-song/{songId}', name: '_add_song', methods: ['GET'])]
+    public function addSongToPlaylist(string $userUuid, string $playlistUuid, string $songId, Request $request): JsonResponse
     {
         $user = $this->userRepository->findOneBy(['uuid' => $userUuid]);
         if (!$user) {
@@ -108,34 +134,27 @@ final class PlaylistController extends AbstractController
             return new JsonResponse(['error' => 'Playlist not found'], 403);
         }
 
-        $appleMusicUserToken = $this->appleMusicService->getUserToken($user);
-        if (!$appleMusicUserToken) {
-            return new JsonResponse(['error' => 'Apple Music user token not found'], 403);
+        $playlistService = $this->playlistDataService->getData($playlist, PlaylistDataName::SERVICE_NAME);
+        $song = $this->songRepository->find($songId);
+        if (!$song) {
+            return new JsonResponse(['error' => 'Song not found'], 404);
         }
 
-        $curl = new \Symfony\Component\HttpClient\CurlHttpClient();
-        $client = new APIClient($curl);
-        $client->setDeveloperToken($this->appleMusicService->generateToken());
-        $client->setMusicUserToken($appleMusicUserToken);
-        $api = new AppleMusicAPI($client);
+        if ($playlistService === ServiceName::APPLE_MUSIC) {
+            $this->appleMusicService->addSongToPlaylist($user, $playlist, $song);
+        }
 
-        $song = new LibraryResource(
-            id: $songId,
-            type: 'songs',
-        );
+        if ($playlistService === ServiceName::SPOTIFY) {
+            $this->spotifyService->addSongToPlaylist($user, $playlist, $song);
+        }
 
-        $api->addTracksToLibraryPlaylist($this->playlistService->getPlaylistId($playlist), [$song]);
-
-        $playlist = $this->playlistService->formatPlaylist($api, $playlist);
-
-        $response = new JsonResponse($playlist);
-        return $response;
+        return new JsonResponse(['message' => 'Song added to playlist successfully', "song" => $song->toArray()]);
     }
 
-    #[Route('/{userUuid}/{playlistUuid}/remove-song/{songId}', name: '_all', methods: ['POST'])]
-    public function playlistRemoveSong(string $userUuid, string $playlistUuid, string $songId, Request $request): JsonResponse
+    #[Route('/{userUuid}/{playlistUuid}/add-collaboration-invitation', name: '_add_collaboration_invitation', methods: ['POST'])]
+    public function addCollaboration(string $userUuid, string $playlistUuid, Request $request): JsonResponse
     {
-        $user = $this->userRepository->findOneBy(['uuid' => $userUuid]);
+        $user = $this->getUser();
         if (!$user) {
             return new JsonResponse(['error' => 'User not found'], 403);
         }
@@ -144,28 +163,24 @@ final class PlaylistController extends AbstractController
         if (!$playlist) {
             return new JsonResponse(['error' => 'Playlist not found'], 403);
         }
-
-        $appleMusicUserToken = $this->appleMusicService->getUserToken($user);
-        if (!$appleMusicUserToken) {
-            return new JsonResponse(['error' => 'Apple Music user token not found'], 403);
+        if ($playlist->getUser()->getUuid() !== $userUuid) {
+            return new JsonResponse(['error' => 'Error'], 403);
         }
 
-        $curl = new \Symfony\Component\HttpClient\CurlHttpClient();
-        $client = new APIClient($curl);
-        $client->setDeveloperToken($this->appleMusicService->generateToken());
-        $client->setMusicUserToken($appleMusicUserToken);
-        $api = new AppleMusicAPI($client);
+        $data = json_decode($request->getContent(), true);
+        $collaborationName = $data['name'] ?? null;
+        $collaborationEmail = $data['email'] ?? null;
+        $collaborationLimit = $data['addLimit'] ?? null;
+        $collaboration = new Collaboration();
+        $collaboration->setPlaylist($playlist);
+        $collaboration->setName($collaborationName);
+        $collaboration->setEmail($collaborationEmail);
+        $collaboration->setAddLimit($collaborationLimit);
+        $collaboration->setUuid(Uuid::v7());
 
-        $song = new LibraryResource(
-            id: $songId,
-            type: 'songs',
-        );
-
-        $api->addTracksToLibraryPlaylist($this->playlistService->getPlaylistId($playlist), [$song]);
-
-        $playlist = $this->playlistService->formatPlaylist($api, $playlist);
-
-        $response = new JsonResponse($playlist);
-        return $response;
+        $this->em->persist($collaboration);
+        $this->em->flush();
+        // For now, we will just return a success message
+        return new JsonResponse(['message' => 'Collaboration invitation added successfully']);
     }
 }

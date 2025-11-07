@@ -3,6 +3,7 @@
 namespace App\Entity;
 
 use App\Repository\UserDataRepository;
+use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 
 #[ORM\Entity(repositoryClass: UserDataRepository::class)]
@@ -19,7 +20,7 @@ class UserData
     #[ORM\Column(length: 255)]
     private ?string $name = null;
 
-    #[ORM\Column(length: 255)]
+    #[ORM\Column(type: Types::TEXT)]
     private ?string $value = null;
 
     public function getId(): ?int

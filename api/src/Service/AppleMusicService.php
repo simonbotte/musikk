@@ -7,19 +7,20 @@ use App\Entity\Song;
 use App\Entity\SongData;
 use App\Entity\User;
 use App\Repository\SongRepository;
+use App\Enum\UserDataName;
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\PersistentCollection;
 use Firebase\JWT\JWT;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
-use PlaylistDataName;
-use ServiceName;
-use SongDataName;
+use App\Enum\PlaylistDataName;
+use App\Enum\ServiceName;
+use App\Enum\SongDataName;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Uid\Uuid;
-use UserDataName;
+
 
 class AppleMusicService
 {
@@ -85,7 +86,10 @@ class AppleMusicService
         $apiPlaylistIds = [];
         foreach ($apiPlaylists as $playlist) {
             if (isset($playlist['id'], $playlist['attributes']['name'], $playlist['attributes']['canEdit']) && $playlist['attributes']['canEdit'] === true) {
-                $apiPlaylistIds[$playlist['id']] = $playlist['attributes']['name'];
+                $apiPlaylistIds[$playlist['id']] = [
+                    "name" => $playlist['attributes']['name'],
+                    "artwork" => $playlist['attributes']['artwork']['url'] ?? null
+                ];
             }
         }
 
@@ -101,11 +105,12 @@ class AppleMusicService
         $toRemoveIds    = array_diff_key($localPlaylistWithApiIds, $apiPlaylistIds);
         $commonIds   = array_intersect_key($apiPlaylistIds, $localPlaylistWithApiIds);
 
-        foreach ($toAddIds as $appleMusicId => $name) {
+        foreach ($toAddIds as $appleMusicId => $playlistData) {
             $playlist = new Playlist();
             $playlist->setUser($user)
-                ->setName($name)
-                ->setUuid(Uuid::v4());
+                ->setName($playlistData['name'])
+                ->setArtwork($playlistData['artwork'])
+                ->setUuid(Uuid::v7());
             $this->em->persist($playlist);
             $this->playlistDataService->saveData($playlist, PlaylistDataName::APPLE_MUSIC_PLAYLIST_ID, $appleMusicId);
             $this->playlistDataService->saveData($playlist, PlaylistDataName::SERVICE_NAME, ServiceName::APPLE_MUSIC);
@@ -119,12 +124,21 @@ class AppleMusicService
             }
         }
 
-        foreach ($commonIds as $appleMusicId => $newName) {
+        foreach ($commonIds as $appleMusicId => $playlistData) {
             $playlistEntity = $localPlaylistWithApiIds[$appleMusicId];
-            if ($playlistEntity->getName() !== $newName) {
-                $playlistEntity->setName($newName);
+            $changes = false;
+            if ($playlistEntity->getName() !== $playlistData['name']) {
+                $playlistEntity->setName($playlistData['name']);
+                $changes = true;
+            }
+            if ($playlistEntity->getArtwork() !== $playlistData['artwork']) {
+                $playlistEntity->setArtwork($playlistData['artwork']);
+                $changes = true;
+            }
+            if ($changes) {
                 $this->em->persist($playlistEntity);
             }
+            
         }
         $this->em->flush();
         return $this->playlistService->getUserPlaylistFromService($user, ServiceName::APPLE_MUSIC);
@@ -139,30 +153,32 @@ class AppleMusicService
             'Music-User-Token' => $userToken,
         ];
         $appleMusicPlaylistId = $this->playlistDataService->getData($playlist, PlaylistDataName::APPLE_MUSIC_PLAYLIST_ID);
-        
-        
-        $response = $this->client->get('me/library/playlists/'. $appleMusicPlaylistId . '/tracks', [
+
+
+        $response = $this->client->get('me/library/playlists/' . $appleMusicPlaylistId . '/tracks', [
             'headers' => $headers
         ]);
-        
+
         $apiPlaylist = json_decode((string) $response->getBody()->getContents(), true)['data'] ?? null;
         if ($apiPlaylist === null) {
             throw new \RuntimeException('Invalid response from Spotify API');
         }
-        
         $apiPlaylistSong = [];
         foreach ($apiPlaylist as $item) {
-            $apiPlaylistSong[$item['id']] = [
-                'id' => $item['id'],
-                'title' => $item['attributes']['name'],
-                'artist' => $item['attributes']['artistName'],
-                'album' => $item['attributes']['albumName'],
-            ];
+            if (isset($item['attributes']['playParams'])) {
+                $apiPlaylistSong[$item['attributes']['playParams']['catalogId']] = [
+                    'id' => $item['attributes']['playParams']['catalogId'],
+                    'title' => $item['attributes']['name'],
+                    'artist' => $item['attributes']['artistName'],
+                    'album' => $item['attributes']['albumName'],
+                    'artwork' => $item['attributes']['artwork']['url'] ?? null,
+                ];
+            }
         }
 
         $localPlaylistSongs = [];
         foreach ($playlist->getSongs() as $song) {
-            $songId = $this->songDataService->getData($song,SongDataName::APPLE_MUSIC_SONG_ID);
+            $songId = $this->songDataService->getData($song, SongDataName::APPLE_MUSIC_SONG_ID);
             $localPlaylistSongs[$songId] = [
                 'id' => $song->getId(),
                 'title' => $song->getTitle(),
@@ -173,36 +189,35 @@ class AppleMusicService
 
         $toAddSongs = array_diff_key($apiPlaylistSong, $localPlaylistSongs);
         $toRemoveSongs = array_diff_key($localPlaylistSongs, $apiPlaylistSong);
-
         foreach ($toAddSongs as $appleMusicId => $songData) {
             $song = $this->songService->getSong($appleMusicId, SongDataName::APPLE_MUSIC_SONG_ID);
             if (!$song) {
-                $song = $this->songRepository->findOneBy([
-                    'title' => $songData['title'],
-                    'artist' => $songData['artist'] ?? 'Unknown Artist',
-                    'album' => $songData['album'] ?? 'Unknown Album',
-                ]);
+                $song = $this->songService->getSongByData(
+                    $songData['title'],
+                    $songData['artist'] ?? 'Unknown Artist',
+                    $songData['album'] ?? 'Unknown Album'
+                );
                 if ($song) {
-                    $songData = new SongData();
-                    $songData->setSong($song)
-                        ->setName(SongDataName::APPLE_MUSIC_SONG_ID)
-                        ->setValue($appleMusicId);
-                    $this->em->persist($songData);
+                    $this->songDataService->saveData(
+                        $song,
+                        SongDataName::APPLE_MUSIC_SONG_ID,
+                        $appleMusicId
+                    );
                 }
             }
             if (!$song) {
-                $song = new Song();
-                $song->setTitle($songData['title'])
-                    ->setArtist($songData['artist'] ?? 'Unknown Artist')
-                    ->setAlbum($songData['album'] ?? 'Unknown Album');
-                $songData = new SongData();
-                $songData->setSong($song)
-                    ->setName(SongDataName::APPLE_MUSIC_SONG_ID)
-                    ->setValue($appleMusicId);
-                $this->em->persist($songData);
-                $this->em->persist($song);
+                $song = $this->songService->addSong(
+                    $songData['title'],
+                    $songData['artist'] ?? 'Unknown Artist',
+                    $songData['album'] ?? 'Unknown Album',
+                    SongDataName::APPLE_MUSIC_SONG_ID,
+                    $appleMusicId,
+                    SongDataName::APPLE_MUSIC_ARTWORK,
+                    $songData['artwork'] ?? null,
+                );
             }
             $playlist->addSong($song);
+            $this->em->persist($playlist);
             $this->em->flush();
         }
 
@@ -211,40 +226,112 @@ class AppleMusicService
             if ($song) {
                 $playlist->removeSong($song);
             }
-        }    
+        }
         return $playlist->getSongs();
     }
 
-    public function searchSong(string $q, string $storefront = "fr"): array
+    public function searchSong(string $q, string $storefront = 'fr'): array
     {
         $developerToken = $this->generateToken();
-        $headers = [
-            'Authorization' => 'Bearer ' . $developerToken,
-        ];
+        $headers = ['Authorization' => 'Bearer ' . $developerToken];
+
         $urlQuery = http_build_query([
-            'term' => $q,
+            'term'  => $q,
             'types' => 'songs',
-            'limit' => 25,
-            'l' => $storefront,
-            'with' => 'topResults',
+            'limit' => 20,
         ]);
-        $response = $this->client->get('catalog/'.$storefront.'/search?' . $urlQuery, [
+
+        $response = $this->client->get('catalog/' . $storefront . '/search?' . $urlQuery, [
             'headers' => $headers
         ]);
+
         $apiResponse = json_decode((string) $response->getBody(), true);
         if (!isset($apiResponse['results']['songs']['data'])) {
             return [];
         }
-        $songs = $apiResponse['results']['songs']['data'];
-        $formattedSongs = [];
-        foreach ($songs as $song) {
-            $formattedSongs[] = [
-                'id' => $song['id'],
-                'title' => $song['attributes']['name'],
-                'artist' => $song['attributes']['artistName'],
-                'album' => $song['attributes']['albumName'] ?? 'Unknown Album',
-            ];
+
+        $apiSongs = $apiResponse['results']['songs']['data'];
+        $songs    = [];
+        $changed  = false;
+
+        $this->em->wrapInTransaction(function () use ($apiSongs, &$songs, &$changed) {
+            foreach ($apiSongs as $apiSong) {
+                $title  = $apiSong['attributes']['name'];
+                $artist = $apiSong['attributes']['artistName'] ?? 'Unknown Artist';
+                $album  = $apiSong['attributes']['albumName']  ?? 'Unknown Album';
+                $id     = $apiSong['id'];
+                $artworkUrl    = $apiSong['attributes']['artwork']['url'] ?? null;
+                $song = $this->songService->getSong($id, SongDataName::APPLE_MUSIC_SONG_ID);
+                if ($song === null) {
+                    $song = $this->songService->getSongByData($title, $artist, $album);
+                    if ($song !== null) {
+                        $this->songDataService->saveData($song, SongDataName::APPLE_MUSIC_SONG_ID, $id);
+                        if ($artworkUrl !== null) {
+                            $this->songDataService->saveData($song, SongDataName::APPLE_MUSIC_ARTWORK, $artworkUrl);
+                        }
+                        
+                        $changed = true;
+                    }
+                }
+
+                if ($song === null) {
+                    $song = $this->songService->addSong(
+                        $title,
+                        $artist,
+                        $album,
+                        SongDataName::APPLE_MUSIC_SONG_ID,
+                        $id,
+                        SongDataName::APPLE_MUSIC_ARTWORK,
+                        $artworkUrl,
+                    );
+                    $changed = true;
+                }
+
+                $songs[] = $song;
+            }
+
+            if ($changed) {
+                $this->em->flush();
+            }
+        });
+
+        return array_map(fn(Song $s) => $s->toArray(), $songs);
+    }
+
+
+    public function addSongToPlaylist(User $user, Playlist $playlist, Song $song): ?Song
+    {
+        if (!$playlist->getSongs()->contains($song)) {
+            $playlist->addSong($song);
+            $this->em->persist($playlist);
+            $this->em->flush();
         }
-        return $formattedSongs;
+
+        $userToken = $this->userDataService->getData($user, UserDataName::APPLE_MUSIC_USER_TOKEN);
+        $developerToken = $this->generateToken();
+        $headers = [
+            'Authorization' => 'Bearer ' . $developerToken,
+            'Music-User-Token' => $userToken,
+        ];
+        $appleMusicPlaylistId = $this->playlistDataService->getData($playlist, PlaylistDataName::APPLE_MUSIC_PLAYLIST_ID);
+
+
+        $response = $this->client->post('me/library/playlists/' . $appleMusicPlaylistId . '/tracks', [
+            'headers' => $headers,
+            'json' => [
+                'data' => [
+                    [
+                        'id' => $song->getSongData()->filter(function ($data) {
+                            return $data->getName() === SongDataName::APPLE_MUSIC_SONG_ID;
+                        })->first()->getValue(),
+                        'type' => 'songs',
+                    ],
+                ],
+            ],
+        ]);
+        if ($response->getStatusCode() !== Response::HTTP_NO_CONTENT) {
+            throw new \RuntimeException('Failed to add song to Apple Music playlist');
+        }
+        return $song;
     }
 }

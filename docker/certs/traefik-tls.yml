@@ -1,4 +1,4 @@
 tls:
   certificates:
-    - certFile: /certs/musikk.localhost+1.pem
-      keyFile: /certs/musikk.localhost+1-key.pem
+    - certFile: /certs/localhost.pem
+      keyFile: /certs/localhost-key.pem

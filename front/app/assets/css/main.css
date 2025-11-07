@@ -1,0 +1,25 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+@theme {
+    --font-sans: "Outfit", system-ui, sans-serif;
+    --default-transition-duration: 300ms;
+}
+
+.scrollbar-hidden::-webkit-scrollbar {
+    display: none;
+}
+.scrollbar-hidden {
+    -ms-overflow-style: none; /* IE et Edge */
+    scrollbar-width: none; /* Firefox */
+}
+
+.slide-enter-active,
+.slide-leave-active {
+    transition: all 0.4s;
+}
+.slide-enter-from,
+.slide-leave-to {
+    opacity: 0;
+    filter: blur(1rem);
+}

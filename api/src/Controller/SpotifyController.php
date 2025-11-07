@@ -6,12 +6,13 @@ use App\Entity\User;
 use App\Repository\UserRepository;
 use App\Service\SpotifyService;
 use App\Service\UserDataService;
+use App\Enum\UserDataName;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
-use UserDataName;
+
 
 #[Route('/spotify', name: 'app_spotify')]
 final class SpotifyController extends AbstractController

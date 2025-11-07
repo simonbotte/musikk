@@ -1,5 +1,7 @@
 <?php
 
+namespace App\Enum;
+
 final class ServiceName
 {
     public const APPLE_MUSIC = 'apple_music';

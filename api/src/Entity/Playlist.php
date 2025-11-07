@@ -7,7 +7,7 @@ use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
-use PlaylistDataName;
+use App\Enum\PlaylistDataName;
 
 #[ORM\Entity(repositoryClass: PlaylistRepository::class)]
 class Playlist
@@ -38,15 +38,28 @@ class Playlist
     #[ORM\ManyToMany(targetEntity: Song::class, inversedBy: 'playlists')]
     private Collection $songs;
 
+    /**
+     * @var Collection<int, Collaboration>
+     */
+    #[ORM\OneToMany(targetEntity: Collaboration::class, mappedBy: 'playlist')]
+    private Collection $collaborations;
+
+    #[ORM\Column(type: Types::TEXT, nullable: true)]
+    private ?string $artwork = null;
+
+    #[ORM\Column(type: Types::DATETIMETZ_MUTABLE, nullable: true)]
+    private ?\DateTime $lastModifiedDate = null;
+
     public function __construct()
     {
         $this->playlistData = new ArrayCollection();
         $this->songs = new ArrayCollection();
+        $this->collaborations = new ArrayCollection();
     }
 
     public function toArray(): array
     {
-        return [
+        $data = [
             'id' => $this->getId(),
             'name' => $this->getName(),
             'uuid' => $this->getUuid(),
@@ -56,6 +69,12 @@ class Playlist
                 return $data->getName() === PlaylistDataName::SERVICE_NAME;
             })->first()?->getValue(),
         ];
+        
+        if ($this->getArtwork() !== null) {
+            $data['artwork'] = $this->getArtwork();
+        }
+        
+        return $data;
     }
 
     public function getId(): ?int
@@ -149,6 +168,60 @@ class Playlist
     public function removeSong(Song $song): static
     {
         $this->songs->removeElement($song);
+
+        return $this;
+    }
+
+    /**
+     * @return Collection<int, Collaboration>
+     */
+    public function getCollaborations(): Collection
+    {
+        return $this->collaborations;
+    }
+
+    public function addCollaboration(Collaboration $collaboration): static
+    {
+        if (!$this->collaborations->contains($collaboration)) {
+            $this->collaborations->add($collaboration);
+            $collaboration->setPlaylist($this);
+        }
+
+        return $this;
+    }
+
+    public function removeCollaboration(Collaboration $collaboration): static
+    {
+        if ($this->collaborations->removeElement($collaboration)) {
+            // set the owning side to null (unless already changed)
+            if ($collaboration->getPlaylist() === $this) {
+                $collaboration->setPlaylist(null);
+            }
+        }
+
+        return $this;
+    }
+
+    public function getArtwork(): ?string
+    {
+        return $this->artwork;
+    }
+
+    public function setArtwork(?string $artwork): static
+    {
+        $this->artwork = $artwork;
+
+        return $this;
+    }
+
+    public function getLastModifiedDate(): ?\DateTime
+    {
+        return $this->lastModifiedDate;
+    }
+
+    public function setLastModifiedDate(?\DateTime $lastModifiedDate): static
+    {
+        $this->lastModifiedDate = $lastModifiedDate;
 
         return $this;
     }

@@ -8,6 +8,7 @@ use App\Entity\Song;
 use App\Entity\SongData;
 use App\Entity\User;
 use App\Repository\SongRepository;
+use App\Enum\UserDataName;
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\EntityManagerInterface;
@@ -16,14 +17,14 @@ use Dom\Entity;
 use Firebase\JWT\JWT;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
-use PlaylistDataName;
-use ServiceName;
-use SongDataName;
+use App\Enum\PlaylistDataName;
+use App\Enum\ServiceName;
+use App\Enum\SongDataName;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Uid\Uuid;
-use UserDataName;
+
 
 class SpotifyService
 {
@@ -50,7 +51,7 @@ class SpotifyService
     public function getLoginUrl(): string
     {
         $state = bin2hex(random_bytes(8));
-        $scope = 'user-read-private user-read-email';
+        $scope = 'user-read-private user-read-email playlist-modify-public playlist-modify-private user-library-read user-library-modify';
         $redirect_uri = "https://musikk.localhost/login/spotify";
         $queryParams = http_build_query([
             'response_type' => 'code',
@@ -119,13 +120,21 @@ class SpotifyService
                 'headers' => ['Authorization' => 'Bearer ' . $accessToken],
             ]);
             $apiPlaylists = json_decode((string) $response->getBody(), true)['items'] ?? [];
-            $apiPlaylistIds = array_column($apiPlaylists, 'name', 'id');
-
+            // $apiPlaylistIds = array_column($apiPlaylists, 'name', 'id');
+            $apiPlaylistIds = [];
+            foreach ($apiPlaylists as $playlist) {
+                if (isset($playlist['id'], $playlist['name'])) {
+                    $apiPlaylistIds[$playlist['id']] = [
+                        "name" => $playlist['name'],
+                        "artwork" => $playlist['images'][0]['url'] ?? null
+                    ];
+                }
+            }
             $localPlaylists = $this->playlistService
                 ->getUserPlaylistFromService($user, ServiceName::SPOTIFY);
             $localPlaylistWithApiIds = [];
             foreach ($localPlaylists as $playlist) {
-                $playlistId = $this->playlistDataService->getData($playlist,PlaylistDataName::SPOTIFY_PLAYLIST_ID);
+                $playlistId = $this->playlistDataService->getData($playlist, PlaylistDataName::SPOTIFY_PLAYLIST_ID);
                 $localPlaylistWithApiIds[$playlistId] = $playlist;
             }
 
@@ -133,11 +142,12 @@ class SpotifyService
             $toRemoveIds    = array_diff_key($localPlaylistWithApiIds, $apiPlaylistIds);
             $commonIds   = array_intersect_key($apiPlaylistIds, $localPlaylistWithApiIds);
 
-            foreach ($toAddIds as $spotifyId => $name) {
+            foreach ($toAddIds as $spotifyId => $playlistData) {
                 $playlist = new Playlist();
                 $playlist->setUser($user)
-                    ->setName($name)
-                    ->setUuid(Uuid::v4());
+                    ->setName($playlistData['name'])
+                    ->setArtwork($playlistData['artwork'])
+                    ->setUuid(Uuid::v7());
                 $this->em->persist($playlist);
                 $this->playlistDataService->saveData($playlist, PlaylistDataName::SPOTIFY_PLAYLIST_ID, $spotifyId);
                 $this->playlistDataService->saveData($playlist, PlaylistDataName::SERVICE_NAME, ServiceName::SPOTIFY);
@@ -151,11 +161,19 @@ class SpotifyService
                 }
             }
 
-            foreach ($commonIds as $spotifyId => $newName) {
-                $entity = $localPlaylistWithApiIds[$spotifyId];
-                if ($entity->getName() !== $newName) {
-                    $entity->setName($newName);
-                    $this->em->persist($entity);
+            foreach ($commonIds as $spotifyId => $playlistData) {
+                $playlistEntity = $localPlaylistWithApiIds[$spotifyId];
+                $changed = false;
+                if ($playlistEntity->getName() !== $playlistData['name']) {
+                    $playlistEntity->setName($playlistData['name']);
+                }
+
+                if ($playlistEntity->getArtwork() !== $playlistData['artwork']) {
+                    $playlistEntity->setArtwork($playlistData['artwork']);
+                    $changed = true;
+                }
+                if ($changed) {
+                    $this->em->persist($playlistEntity);
                 }
             }
             $this->em->flush();
@@ -185,10 +203,10 @@ class SpotifyService
         $spotifyPlaylistId = $this->playlistDataService->getData($playlist, PlaylistDataName::SPOTIFY_PLAYLIST_ID);
 
         try {
-            $response = $this->client->get('playlists/'.$spotifyPlaylistId, [
+            $response = $this->client->get('playlists/' . $spotifyPlaylistId, [
                 'headers' => ['Authorization' => 'Bearer ' . $accessToken],
             ]);
-            
+
             $apiPlaylist = json_decode((string) $response->getBody()->getContents(), true) ?? null;
             if ($apiPlaylist === null) {
                 throw new \RuntimeException('Invalid response from Spotify API');
@@ -199,16 +217,17 @@ class SpotifyService
                 $apiPlaylistSong[$item['track']['id']] = [
                     'id' => $item['track']['id'],
                     'title' => $item['track']['name'],
-                    'artist' => implode(", ",array_map(function ($artist) {
+                    'artist' => implode(", ", array_map(function ($artist) {
                         return $artist['name'];
                     }, $item['track']['artists'])),
                     'album' => $item['track']['album']['name'] ?? null,
+                    'artwork' => $item['track']['album']['images'][0]['url'] ?? null,
                 ];
             }
 
             $localPlaylistSongs = [];
             foreach ($playlist->getSongs() as $song) {
-                $songId = $this->songDataService->getData($song,SongDataName::SPOTIFY_SONG_ID);
+                $songId = $this->songDataService->getData($song, SongDataName::SPOTIFY_SONG_ID);
                 $localPlaylistSongs[$songId] = [
                     'id' => $song->getId(),
                     'title' => $song->getTitle(),
@@ -228,18 +247,25 @@ class SpotifyService
                         'artist' => $songData['artist'] ?? 'Unknown Artist',
                         'album' => $songData['album'] ?? 'Unknown Album',
                     ]);
+                    if ($song) {
+                        $this->songService->addServiceIdToSong(
+                            $song,
+                            $spotifyId,
+                            SongDataName::SPOTIFY_SONG_ID,
+                            false
+                        );
+                    }
                 }
                 if (!$song) {
-                    $song = new Song();
-                    $song->setTitle($songData['title'])
-                        ->setArtist($songData['artist'] ?? 'Unknown Artist')
-                        ->setAlbum($songData['album'] ?? 'Unknown Album');
-                    $songData = new SongData();
-                    $songData->setSong($song)
-                        ->setName(SongDataName::SPOTIFY_SONG_ID)
-                        ->setValue($spotifyId);
-                    $this->em->persist($songData);
-                    $this->em->persist($song);
+                    $song = $this->songService->addSong(
+                        $songData['title'],
+                        $songData['artist'] ?? 'Unknown Artist',
+                        $songData['album'] ?? 'Unknown Album',
+                        $songData['artwork'] ?? null,
+                        ServiceName::SPOTIFY,
+                        SongDataName::SPOTIFY_SONG_ID,
+                        false
+                    );
                 }
                 $playlist->addSong($song);
                 $this->em->flush();
@@ -251,8 +277,7 @@ class SpotifyService
                     $playlist->removeSong($song);
                 }
             }
-        }
-        catch (GuzzleException $e) {
+        } catch (GuzzleException $e) {
             if ($e->getCode() === Response::HTTP_UNAUTHORIZED && !$retry) {
 
                 $refreshToken = $this->userDataService->getData($user, UserDataName::SPOTIFY_REFRESH_TOKEN);
@@ -282,26 +307,105 @@ class SpotifyService
                 'query' => [
                     'q' => $q,
                     'type' => 'track',
-                    'limit' => 20,
+                    'limit' => 5,
                     'market' => $market,
                 ],
             ]);
-            $data = json_decode((string) $response->getBody(), true);
-            $songs = $data['tracks']['items'];
-            $formatedSongs = [];
-            foreach ($songs as $song) {
-                $formatedSongs[] = [
-                    'id' => $song['id'],
-                    'title' => $song['name'],
+            $apiSongsData = json_decode((string) $response->getBody(), true) ?? null;
+            if ($apiSongsData === null || !isset($apiSongsData['tracks']['items'])) {
+                throw new \RuntimeException('Invalid response from Spotify API');
+            }
+
+            $apiSongs = [];
+            foreach ($apiSongsData['tracks']['items'] as $item) {
+                $apiSongs[$item['track']['id']] = [
+                    'id' => $item['track']['id'],
+                    'title' => $item['track']['name'],
                     'artist' => implode(", ", array_map(function ($artist) {
                         return $artist['name'];
-                    }, $song['artists'])),
-                    'album' => $song['album']['name'] ?? null,
+                    }, $item['track']['artists'])),
+                    'album' => $item['track']['album']['name'] ?? null,
+                    'artwork' => $item['track']['album']['images'][0]['url'] ?? null,
                 ];
+            }
+            $formatedSongs = [];
+            $newSongPersisted = false;
+            foreach ($apiSongs as $apiSong) {
+                $artistName = implode(", ", array_map(function ($artist) {
+                    return $artist['name'];
+                }, $apiSong['artists']));
+
+                $song = $this->songService->getSong($apiSong['id'], SongDataName::SPOTIFY_SONG_ID);
+                if ($song === null) {
+                    $song = $this->songService->getSongByData(
+                        $apiSong['title'],
+                        $artistName,
+                        $apiSong['album'],
+                    );
+                    if ($song !== null) {
+                        $this->songService->addServiceIdToSong(
+                            $song,
+                            $apiSong['id'],
+                            SongDataName::SPOTIFY_SONG_ID,
+                            false
+                        );
+                        $newSongPersisted = true;
+                    }
+                }
+                if ($song === null) {
+                    $this->songService->addSong(
+                        $apiSong['title'],
+                        $artistName,
+                        $apiSong['album'],
+                        $apiSong['artwork'],
+                        $apiSong['id'],
+
+                        SongDataName::SPOTIFY_SONG_ID,
+                        false
+                    );
+                    $newSongPersisted = true;
+                }
+
+                $formatedSongs[] = [
+                    'id' => $apiSong['id'],
+                    'title' => $apiSong['title'],
+                    'artist' => $artistName,
+                    'album' => $apiSong['album'],
+                ];
+            }
+            if ($newSongPersisted) {
+                $this->em->flush();
             }
             return $formatedSongs;
         } catch (GuzzleException $e) {
             throw new \RuntimeException('Error while searching Spotify song: ' . $e->getMessage());
+        }
+    }
+
+    public function addSongToPlaylist(User $user, Playlist $playlist, Song $song): ?Song
+    {
+        $accessToken = $this->userDataService->getData($user, UserDataName::SPOTIFY_USER_TOKEN);
+        if (!$accessToken) {
+            throw new \RuntimeException('Spotify access token not found');
+        }
+
+        $spotifyPlaylistId = $this->playlistDataService->getData($playlist, PlaylistDataName::SPOTIFY_PLAYLIST_ID);
+        $spotifySongId = $this->songDataService->getData($song, SongDataName::SPOTIFY_SONG_ID);
+        if (!$spotifyPlaylistId || !$spotifySongId) {
+            throw new \RuntimeException('Spotify playlist or song ID not found');
+        }
+
+        try {
+            $this->client->post("playlists/{$spotifyPlaylistId}/tracks", [
+                'headers' => ['Authorization' => 'Bearer ' . $accessToken],
+                'json' => [
+                    'uris' => ["spotify:track:{$spotifySongId}"],
+                ],
+            ]);
+
+            return $song; // Return the song object after adding it to the playlist
+        } catch (GuzzleException $e) {
+            throw new \RuntimeException('Error while adding song to Spotify playlist: ' . $e->getMessage());
         }
     }
 }

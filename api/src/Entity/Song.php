@@ -2,6 +2,7 @@
 
 namespace App\Entity;
 
+use App\Enum\SongDataName;
 use App\Repository\SongRepository;
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
@@ -28,7 +29,7 @@ class Song
     /**
      * @var Collection<int, SongData>
      */
-    #[ORM\OneToMany(targetEntity: SongData::class, mappedBy: 'song')]
+    #[ORM\OneToMany(targetEntity: SongData::class, mappedBy: 'song', cascade: ['persist'])]
     private Collection $songData;
 
     /**
@@ -143,11 +144,24 @@ class Song
 
     public function toArray(): array
     {
+        $artworks = $this->getSongData()->filter(function (SongData $songData) {
+            return in_array($songData->getName(), [
+                SongDataName::APPLE_MUSIC_ARTWORK,
+                SongDataName::SPOTIFY_ARTWORK,
+            ], true);
+            
+        });
+
+        $artworkUrls = [];
+        foreach ($artworks as $artwork) {
+            $artworkUrls[$artwork->getName()->value] = $artwork->getValue();
+        }
         return [
             'id' => $this->getId(),
             'title' => $this->getTitle(),
             'artist' => $this->getArtist(),
             'album' => $this->getAlbum(),
+            'artworks' => $artworkUrls,
         ];
     }
 }

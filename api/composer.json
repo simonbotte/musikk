@@ -12,6 +12,7 @@
         "doctrine/doctrine-migrations-bundle": "^3.4",
         "doctrine/orm": "^3.3",
         "firebase/php-jwt": "^6.11",
+        "gesdinet/jwt-refresh-token-bundle": "^1.5",
         "guzzlehttp/guzzle": "^7.9",
         "lexik/jwt-authentication-bundle": "^3.1",
         "pouler/apple-music-api": "^0.8.2",

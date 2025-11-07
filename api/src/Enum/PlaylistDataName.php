@@ -1,5 +1,7 @@
 <?php
 
+namespace App\Enum;
+
 final class PlaylistDataName
 {
     public const SERVICE_NAME = 'service_name';

@@ -10,16 +10,17 @@ use App\Service\PlaylistDataService;
 use App\Service\PlaylistService;
 use App\Service\SongService;
 use App\Service\SpotifyService;
-use PlaylistDataName;
+use App\Enum\PlaylistDataName;
 use PouleR\AppleMusicAPI\APIClient;
 use PouleR\AppleMusicAPI\AppleMusicAPI;
 use PouleR\AppleMusicAPI\Entity\LibraryResource;
-use ServiceName;
+use App\Enum\ServiceName;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 #[Route('/song', name: 'app_song')]
 final class SongController extends AbstractController
@@ -39,6 +40,7 @@ final class SongController extends AbstractController
     }
 
     #[Route('/search/{service}/{query}', name: '_search', methods: ['GET'])]
+    #[IsGranted('PUBLIC_ACCESS')]
     public function search(string $query, string $service, Request $request): JsonResponse
     {
         $songs = [];

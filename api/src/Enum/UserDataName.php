@@ -1,5 +1,7 @@
 <?php
 
+namespace App\Enum;
+
 final class UserDataName
 {
     public const APPLE_MUSIC_USER_TOKEN = 'apple_music_user_token';

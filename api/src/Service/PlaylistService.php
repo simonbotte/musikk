@@ -7,12 +7,13 @@ use App\Entity\PlaylistData;
 use App\Entity\User;
 use App\Repository\PlaylistDataRepository;
 use App\Repository\PlaylistRepository;
+use App\Enum\UserDataName;
 use Doctrine\Common\Collections\ArrayCollection;
 use Firebase\JWT\JWT;
-use PlaylistDataName;
+use App\Enum\PlaylistDataName;
 use PouleR\AppleMusicAPI\AppleMusicAPI;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
-use UserDataName;
+
 
 class PlaylistService
 {

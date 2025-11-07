@@ -5,20 +5,21 @@ namespace App\Service;
 use App\Entity\Song;
 use App\Entity\User;
 use App\Entity\SongData;
+use App\Enum\SongDataName;
 use App\Repository\SongDataRepository;
 use Doctrine\ORM\EntityManagerInterface;
 
 class SongDataService
 {
     private SongDataRepository $songDataRepository;
-    private EntityManagerInterface $entityManager;
+    private EntityManagerInterface $em;
 
     public function __construct(EntityManagerInterface $entityManager, SongDataRepository $songDataRepository) {
         $this->songDataRepository = $songDataRepository;
-        $this->entityManager = $entityManager;
+        $this->em = $entityManager;
     }
 
-    public function getData(Song $song, string $dataName): ?string
+    public function getData(Song $song, SongDataName $dataName): ?string
     {
         $songData = $this->songDataRepository->findOneBy(['song' => $song, 'name' => $dataName]);
         if ($songData instanceof SongData) {
@@ -27,20 +28,18 @@ class SongDataService
         return null;
     }
 
-    public function saveData(Song $song, string $dataName, string $value): SongData
+    public function saveData(Song $song, SongDataName $dataName, string $value): SongData
     {
         $songData = $this->songDataRepository->findOneBy(['song' => $song, 'name' => $dataName]);
         if ($songData instanceof SongData) {
             $songData->setValue($value);
-            $this->entityManager->persist($songData);
+            $this->em->persist($songData);
         } else {
             $songData = new SongData();
-            $songData->setSong($song);
             $songData->setName($dataName);
             $songData->setValue($value);
-            $this->entityManager->persist($songData);
+            $song->addSongData($songData);
         }
-        $this->entityManager->flush();
         return $songData;
     }
 }

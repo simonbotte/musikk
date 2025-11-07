@@ -2,7 +2,9 @@
 
 namespace App\Entity;
 
+use App\Enum\SongDataName;
 use App\Repository\SongDataRepository;
+use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 
 #[ORM\Entity(repositoryClass: SongDataRepository::class)]
@@ -16,10 +18,10 @@ class SongData
     #[ORM\ManyToOne(inversedBy: 'songData')]
     private ?Song $song = null;
 
-    #[ORM\Column(length: 255)]
-    private ?string $name = null;
+    #[ORM\Column(enumType: SongDataName::class)]
+    private ?SongDataName $name = null;
 
-    #[ORM\Column(length: 255)]
+    #[ORM\Column(type: Types::TEXT)]
     private ?string $value = null;
 
     public function getId(): ?int
@@ -39,15 +41,14 @@ class SongData
         return $this;
     }
 
-    public function getName(): ?string
+    public function getName(): SongDataName
     {
         return $this->name;
     }
 
-    public function setName(string $name): static
+    public function setName(SongDataName $name): self
     {
         $this->name = $name;
-
         return $this;
     }
 
