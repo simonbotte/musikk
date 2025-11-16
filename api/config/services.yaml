@@ -9,6 +9,7 @@ parameters:
     appleMusicTeamId: '%env(APPLE_MUSIC_TEAM_ID)%'
     spotifyClientId: '%env(SPOTIFY_CLIENT_ID)%'
     spotifyClientSecret: '%env(SPOTIFY_CLIENT_SECRET)%'
+    cors_allowed_origins: '%env(csv:CORS_ALLOWED_ORIGINS)%'
 services:
     # default configuration for services in *this* file
     _defaults:
@@ -27,6 +28,10 @@ services:
     App\EventListener\DebugRefreshTokenListener:
         tags:
         - { name: kernel.event_listener, event: kernel.request, method: onKernelRequest, priority: 100 }
+
+    App\EventSubscriber\CorsSubscriber:
+        arguments:
+            $allowedOrigins: '%cors_allowed_origins%'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
